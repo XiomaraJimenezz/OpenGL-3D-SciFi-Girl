@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <algorithm>
 #include <glad/glad.h>
+#include "Shader.h"
 #include <GLFW/glfw3.h>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
@@ -216,26 +217,6 @@ out vec4 FragColor;uniform vec3 color;
 void main(){FragColor=vec4(color,1.0);}
 )GLSL";
 
-// Compila los shaders y crea el programa que utiliza la GPU.
-GLuint programa(const char* vs, const char* fs) {
-    auto compilar = [](GLenum tipo, const char* src)->GLuint {
-        GLuint s = glCreateShader(tipo);glShaderSource(s, 1, &src, nullptr);glCompileShader(s);
-        GLint ok = 0;glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
-        if (!ok) { char log[4096];glGetShaderInfoLog(s, sizeof(log), nullptr, log);std::cerr << "Error shader: " << log << '\n';glDeleteShader(s);return 0; }
-        return s;
-        };
-    GLuint v = compilar(GL_VERTEX_SHADER, vs), f = compilar(GL_FRAGMENT_SHADER, fs);
-    if (!v || !f) { if (v)glDeleteShader(v);if (f)glDeleteShader(f);return 0; }
-    GLuint p = glCreateProgram();glAttachShader(p, v);glAttachShader(p, f);glLinkProgram(p);
-    glDeleteShader(v);glDeleteShader(f);
-    GLint ok = 0;glGetProgramiv(p, GL_LINK_STATUS, &ok);
-    if (!ok) { char log[4096];glGetProgramInfoLog(p, sizeof(log), nullptr, log);std::cerr << "Error programa: " << log << '\n';glDeleteProgram(p);return 0; }
-    return p;
-}
-// Funciones auxiliares para enviar matrices y vectores a los shaders.
-void uniformMat(GLuint p, const char* n, const glm::mat4& m) { glUniformMatrix4fv(glGetUniformLocation(p, n), 1, GL_FALSE, glm::value_ptr(m)); }
-void uniformVec(GLuint p, const char* n, const glm::vec3& v) { glUniform3fv(glGetUniformLocation(p, n), 1, glm::value_ptr(v)); }
-
 // 5. TRAYECTORIA DE BEZIER
 // Cada tramo usa cuatro puntos de control. Los cuatro tramos
 // forman una trayectoria cerrada para mover la camara.
@@ -291,156 +272,162 @@ int main() {
     glfwMakeContextCurrent(w);
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) { std::cerr << "Error GLAD\n";glfwDestroyWindow(w);glfwTerminate();return -1; }
     glfwSwapInterval(1);glEnable(GL_DEPTH_TEST);
-    GLuint p = programa(VS, FS), lp = programa(LINE_VS, LINE_FS);
-    if (!p || !lp) { glfwDestroyWindow(w);glfwTerminate();return -1; }
-    // Enviar vertices e indices a la GPU mediante VAO, VBO y EBO.
-    GLuint vao, vbo, ebo;glGenVertexArrays(1, &vao);glGenBuffers(1, &vbo);glGenBuffers(1, &ebo);
-    glBindVertexArray(vao);glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, e.vertices.size() * sizeof(Vertice), e.vertices.data(), GL_STATIC_DRAW);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, e.indices.size() * sizeof(unsigned int), e.indices.data(), GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertice), (void*)offsetof(Vertice, posicion));glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertice), (void*)offsetof(Vertice, normal));glEnableVertexAttribArray(1);
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertice), (void*)offsetof(Vertice, uv));glEnableVertexAttribArray(2);
-    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(Vertice), (void*)offsetof(Vertice, color));glEnableVertexAttribArray(3);
-    glBindVertexArray(0);
-
-    // Textura blanca de respaldo para materiales sin imagen.
-    GLuint blanco;glGenTextures(1, &blanco);glBindTexture(GL_TEXTURE_2D, blanco);
-    const unsigned char pix[] = { 255,255,255,255 };glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, pix);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    std::cout << "GLB: " << gltf.images.size() << " imagenes, " << gltf.textures.size()
-        << " texturas, " << gltf.materials.size() << " materiales.\n";
-    for (size_t i = 0; i < gltf.images.size(); ++i) {
-        const auto& im = gltf.images[i];
-        std::cout << "Imagen " << i << ": " << im.width << "x" << im.height
-            << " canales=" << im.component << " bits=" << im.bits
-            << " bytes=" << im.image.size() << "\n";
-    }
-    for (size_t i = 0; i < gltf.materials.size(); ++i) {
-        const auto& mat = gltf.materials[i];
-        std::cout << "Material " << i << " [" << mat.name << "] baseColorTexture="
-            << mat.pbrMetallicRoughness.baseColorTexture.index;
-        for (const auto& ext : mat.extensions) std::cout << " extension=" << ext.first;
-        std::cout << "\n";
-    }
-    // Crear las texturas del modelo usando las imagenes del GLB.
-    std::vector<GLuint> imagenes(gltf.images.size(), 0);
-    for (size_t i = 0;i < gltf.images.size();i++) {
-        imagenes[i] = texturaImagen(gltf.images[i]);
-        if (!imagenes[i]) std::cout << "AVISO: imagen " << i << " no se pudo subir a OpenGL.\n";
-    }
-
-    // Preparar los puntos que dibujan el recorrido de la camara.
-    std::vector<glm::vec3> curva;
-    for (int i = 0;i <= 240;i++)curva.push_back(trayectoria(i / 240.0f));
-    GLuint lineVAO, lineVBO;glGenVertexArrays(1, &lineVAO);glGenBuffers(1, &lineVBO);
-    glBindVertexArray(lineVAO);glBindBuffer(GL_ARRAY_BUFFER, lineVBO);
-    glBufferData(GL_ARRAY_BUFFER, curva.size() * sizeof(glm::vec3), curva.data(), GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);glEnableVertexAttribArray(0);glBindVertexArray(0);
-
-    // Estado de los modos, posicion de camara y tiempo de animacion.
-    bool autoCam = false, girar = true, phong = true, luzMovil = true, mostrarCurva = false, pausa = false;
-    bool prev1 = false, prev2 = false, prev3 = false, prevL = false, prevF = false, prevB = false, prevSpace = false;
-    glm::vec3 cam(0, 1.3f, 4.8f);float yaw = -90, pitch = -7;
-    float reloj = 0, anguloModelo = 0, ultimo = (float)glfwGetTime();
-    std::cout << "\nCONTROLES\n1 camara manual | 2 camara Bezier | 3 giro personaje\n"
-        << "L Phong | F luz movil | B trayectoria | ESPACIO pausa\n"
-        << "WASD mover | Q/E bajar/subir | Flechas mirar | Shift rapido | R reiniciar | ESC salir\n";
-    // Bucle principal: se repite mientras la ventana siga abierta.
-    while (!glfwWindowShouldClose(w)) {
-        float ahora = (float)glfwGetTime(), dt = std::min(0.05f, ahora - ultimo);ultimo = ahora;
-        glfwPollEvents();
-        if (glfwGetKey(w, GLFW_KEY_ESCAPE) == GLFW_PRESS)glfwSetWindowShouldClose(w, true);
-        if (teclaNueva(w, GLFW_KEY_1, prev1))autoCam = false;
-        if (teclaNueva(w, GLFW_KEY_2, prev2))autoCam = true;
-        if (teclaNueva(w, GLFW_KEY_3, prev3))girar = !girar;
-        if (teclaNueva(w, GLFW_KEY_L, prevL))phong = !phong;
-        if (teclaNueva(w, GLFW_KEY_F, prevF))luzMovil = !luzMovil;
-        if (teclaNueva(w, GLFW_KEY_B, prevB))mostrarCurva = !mostrarCurva;
-        if (teclaNueva(w, GLFW_KEY_SPACE, prevSpace))pausa = !pausa;
-        // Actualizar el tiempo y el giro del personaje si no hay pausa.
-        if (!pausa) { reloj += dt;if (girar)anguloModelo += dt * glm::radians(14.0f); }
-        // Camara automatica con Bezier o camara manual con teclado.
-        glm::vec3 frente;
-        if (autoCam) { cam = trayectoria(reloj / 18.0f);frente = glm::normalize(glm::vec3(0, 1.35f, 0) - cam); }
-        else {
-            if (glfwGetKey(w, GLFW_KEY_LEFT) == GLFW_PRESS)yaw -= 75 * dt;
-            if (glfwGetKey(w, GLFW_KEY_RIGHT) == GLFW_PRESS)yaw += 75 * dt;
-            if (glfwGetKey(w, GLFW_KEY_UP) == GLFW_PRESS)pitch += 75 * dt;
-            if (glfwGetKey(w, GLFW_KEY_DOWN) == GLFW_PRESS)pitch -= 75 * dt;
-            pitch = glm::clamp(pitch, -89.0f, 89.0f);
-            frente = glm::normalize(glm::vec3(cos(glm::radians(yaw)) * cos(glm::radians(pitch)), sin(glm::radians(pitch)), sin(glm::radians(yaw)) * cos(glm::radians(pitch))));
-            glm::vec3 der = glm::normalize(glm::cross(frente, glm::vec3(0, 1, 0)));
-            float paso = 2.5f * dt * (glfwGetKey(w, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ? 2.0f : 1.0f);
-            if (glfwGetKey(w, GLFW_KEY_W) == GLFW_PRESS)cam += frente * paso;
-            if (glfwGetKey(w, GLFW_KEY_S) == GLFW_PRESS)cam -= frente * paso;
-            if (glfwGetKey(w, GLFW_KEY_A) == GLFW_PRESS)cam -= der * paso;
-            if (glfwGetKey(w, GLFW_KEY_D) == GLFW_PRESS)cam += der * paso;
-            if (glfwGetKey(w, GLFW_KEY_Q) == GLFW_PRESS)cam.y -= paso;
-            if (glfwGetKey(w, GLFW_KEY_E) == GLFW_PRESS)cam.y += paso;
-            if (glfwGetKey(w, GLFW_KEY_R) == GLFW_PRESS) { cam = { 0,1.3f,4.8f };yaw = -90;pitch = -7; }
+    { // Los objetos Shader deben destruirse antes de cerrar el contexto OpenGL.
+        Shader shaderModelo(VS, FS);
+        Shader shaderCurva(LINE_VS, LINE_FS);
+        if (!shaderModelo.valido() || !shaderCurva.valido()) {
+            std::cerr << "No se pudieron crear los shaders.\n";
+            return -1;
         }
-        // Preparar la ventana, la perspectiva y la vista de la camara.
-        int ancho, alto;glfwGetFramebufferSize(w, &ancho, &alto);if (alto == 0)continue;
-        glViewport(0, 0, ancho, alto);glClearColor(0.025f, 0.045f, 0.11f, 1);glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glm::mat4 proj = glm::perspective(glm::radians(55.0f), (float)ancho / alto, 0.05f, 100.0f);
-        glm::mat4 view = glm::lookAt(cam, cam + frente, glm::vec3(0, 1, 0));
-        // Matriz del modelo: rotacion del personaje y ajuste de escala.
-        glm::mat4 giro = glm::rotate(glm::mat4(1), anguloModelo, glm::vec3(0, 1, 0));
-        glm::mat4 modelo = giro * normalizar;
-        // Posicion de la luz: fija o en movimiento segun la tecla F.
-        glm::vec3 luz = luzMovil ? glm::vec3(3 * cos(reloj * 0.6f), 3.4f, 3 * sin(reloj * 0.6f)) : glm::vec3(2, 3, 3);
-        // Dibujar cada parte del modelo con su material y textura.
-        glUseProgram(p);uniformMat(p, "model", modelo);uniformMat(p, "view", view);uniformMat(p, "projection", proj);
-        uniformVec(p, "lightPos", luz);uniformVec(p, "viewPos", cam);uniformVec(p, "lightColor", glm::vec3(1.0f, 0.94f, 0.86f));
-        glUniform1i(glGetUniformLocation(p, "usarPhong"), phong ? 1 : 0);
-        glUniform1i(glGetUniformLocation(p, "tex"), 0);
-        glActiveTexture(GL_TEXTURE0);glBindVertexArray(vao);
-        for (const Parte& parte : e.partes) {
-            GLuint t = blanco;glm::vec4 color(1);
-            if (parte.material >= 0 && parte.material < (int)gltf.materials.size()) {
-                const auto& mat = gltf.materials[parte.material];
-                const auto& pbr = mat.pbrMetallicRoughness;
-                if (pbr.baseColorFactor.size() == 4)color = glm::vec4((float)pbr.baseColorFactor[0], (float)pbr.baseColorFactor[1], (float)pbr.baseColorFactor[2], (float)pbr.baseColorFactor[3]);
-                int texID = pbr.baseColorTexture.index;
-                // Algunos GLB antiguos utilizan KHR_materials_pbrSpecularGlossiness.
-                auto ext = mat.extensions.find("KHR_materials_pbrSpecularGlossiness");
-                if (ext != mat.extensions.end() && ext->second.IsObject()) {
-                    const auto& ex = ext->second;
-                    if (ex.Has("diffuseFactor") && ex.Get("diffuseFactor").IsArray()) {
-                        const auto& arr = ex.Get("diffuseFactor").Get<tinygltf::Value::Array>();
-                        if (arr.size() == 4)
-                            for (int k = 0; k < 4; ++k) color[k] = (float)arr[k].GetNumberAsDouble();
-                    }
-                    if (ex.Has("diffuseTexture") && ex.Get("diffuseTexture").IsObject()) {
-                        const auto& dt = ex.Get("diffuseTexture");
-                        if (dt.Has("index") && dt.Get("index").IsInt()) texID = dt.Get("index").Get<int>();
-                    }
-                }
-                if (texID >= 0 && texID < (int)gltf.textures.size()) {
-                    int imagenID = gltf.textures[texID].source;
-                    if (imagenID >= 0 && imagenID < (int)imagenes.size() && imagenes[imagenID])t = imagenes[imagenID];
-                }
-                // Mantener ambas caras visibles; el programa no activa culling.
-                (void)mat.doubleSided;
-            }
-            glUniform4fv(glGetUniformLocation(p, "baseColor"), 1, glm::value_ptr(color));
-            glBindTexture(GL_TEXTURE_2D, t);
-            glDrawElements(GL_TRIANGLES, (GLsizei)parte.cantidad, GL_UNSIGNED_INT, (void*)(uintptr_t)(parte.inicio * sizeof(unsigned int)));
-        }
+        // Enviar vertices e indices a la GPU mediante VAO, VBO y EBO.
+        GLuint vao, vbo, ebo;glGenVertexArrays(1, &vao);glGenBuffers(1, &vbo);glGenBuffers(1, &ebo);
+        glBindVertexArray(vao);glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, e.vertices.size() * sizeof(Vertice), e.vertices.data(), GL_STATIC_DRAW);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, e.indices.size() * sizeof(unsigned int), e.indices.data(), GL_STATIC_DRAW);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertice), (void*)offsetof(Vertice, posicion));glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertice), (void*)offsetof(Vertice, normal));glEnableVertexAttribArray(1);
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertice), (void*)offsetof(Vertice, uv));glEnableVertexAttribArray(2);
+        glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(Vertice), (void*)offsetof(Vertice, color));glEnableVertexAttribArray(3);
         glBindVertexArray(0);
-        // Mostrar la curva en color cian cuando se active la tecla B.
-        if (mostrarCurva) {
-            glUseProgram(lp);uniformMat(lp, "view", view);uniformMat(lp, "projection", proj);
-            uniformVec(lp, "color", glm::vec3(0.12f, 0.86f, 1.0f));
-            glBindVertexArray(lineVAO);glLineWidth(2.0f);glDrawArrays(GL_LINE_STRIP, 0, (GLsizei)curva.size());glBindVertexArray(0);
+
+        // Textura blanca de respaldo para materiales sin imagen.
+        GLuint blanco;glGenTextures(1, &blanco);glBindTexture(GL_TEXTURE_2D, blanco);
+        const unsigned char pix[] = { 255,255,255,255 };glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, pix);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        std::cout << "GLB: " << gltf.images.size() << " imagenes, " << gltf.textures.size()
+            << " texturas, " << gltf.materials.size() << " materiales.\n";
+        for (size_t i = 0; i < gltf.images.size(); ++i) {
+            const auto& im = gltf.images[i];
+            std::cout << "Imagen " << i << ": " << im.width << "x" << im.height
+                << " canales=" << im.component << " bits=" << im.bits
+                << " bytes=" << im.image.size() << "\n";
         }
-        glfwSwapBuffers(w);
-    }
-    // Liberar los recursos de OpenGL antes de cerrar la ventana.
-    for (GLuint t : imagenes)if (t)glDeleteTextures(1, &t);
-    glDeleteTextures(1, &blanco);glDeleteBuffers(1, &lineVBO);glDeleteVertexArrays(1, &lineVAO);
-    glDeleteBuffers(1, &ebo);glDeleteBuffers(1, &vbo);glDeleteVertexArrays(1, &vao);
-    glDeleteProgram(lp);glDeleteProgram(p);glfwDestroyWindow(w);glfwTerminate();return 0;
+        for (size_t i = 0; i < gltf.materials.size(); ++i) {
+            const auto& mat = gltf.materials[i];
+            std::cout << "Material " << i << " [" << mat.name << "] baseColorTexture="
+                << mat.pbrMetallicRoughness.baseColorTexture.index;
+            for (const auto& ext : mat.extensions) std::cout << " extension=" << ext.first;
+            std::cout << "\n";
+        }
+        // Crear las texturas del modelo usando las imagenes del GLB.
+        std::vector<GLuint> imagenes(gltf.images.size(), 0);
+        for (size_t i = 0;i < gltf.images.size();i++) {
+            imagenes[i] = texturaImagen(gltf.images[i]);
+            if (!imagenes[i]) std::cout << "AVISO: imagen " << i << " no se pudo subir a OpenGL.\n";
+        }
+
+        // Preparar los puntos que dibujan el recorrido de la camara.
+        std::vector<glm::vec3> curva;
+        for (int i = 0;i <= 240;i++)curva.push_back(trayectoria(i / 240.0f));
+        GLuint lineVAO, lineVBO;glGenVertexArrays(1, &lineVAO);glGenBuffers(1, &lineVBO);
+        glBindVertexArray(lineVAO);glBindBuffer(GL_ARRAY_BUFFER, lineVBO);
+        glBufferData(GL_ARRAY_BUFFER, curva.size() * sizeof(glm::vec3), curva.data(), GL_STATIC_DRAW);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);glEnableVertexAttribArray(0);glBindVertexArray(0);
+
+        // Estado de los modos, posicion de camara y tiempo de animacion.
+        bool autoCam = false, girar = true, phong = true, luzMovil = true, mostrarCurva = false, pausa = false;
+        bool prev1 = false, prev2 = false, prev3 = false, prevL = false, prevF = false, prevB = false, prevSpace = false;
+        glm::vec3 cam(0, 1.3f, 4.8f);float yaw = -90, pitch = -7;
+        float reloj = 0, anguloModelo = 0, ultimo = (float)glfwGetTime();
+        std::cout << "\nCONTROLES\n1 camara manual | 2 camara Bezier | 3 giro personaje\n"
+            << "L Phong | F luz movil | B trayectoria | ESPACIO pausa\n"
+            << "WASD mover | Q/E bajar/subir | Flechas mirar | Shift rapido | R reiniciar | ESC salir\n";
+        // Bucle principal: se repite mientras la ventana siga abierta.
+        while (!glfwWindowShouldClose(w)) {
+            float ahora = (float)glfwGetTime(), dt = std::min(0.05f, ahora - ultimo);ultimo = ahora;
+            glfwPollEvents();
+            if (glfwGetKey(w, GLFW_KEY_ESCAPE) == GLFW_PRESS)glfwSetWindowShouldClose(w, true);
+            if (teclaNueva(w, GLFW_KEY_1, prev1))autoCam = false;
+            if (teclaNueva(w, GLFW_KEY_2, prev2))autoCam = true;
+            if (teclaNueva(w, GLFW_KEY_3, prev3))girar = !girar;
+            if (teclaNueva(w, GLFW_KEY_L, prevL))phong = !phong;
+            if (teclaNueva(w, GLFW_KEY_F, prevF))luzMovil = !luzMovil;
+            if (teclaNueva(w, GLFW_KEY_B, prevB))mostrarCurva = !mostrarCurva;
+            if (teclaNueva(w, GLFW_KEY_SPACE, prevSpace))pausa = !pausa;
+            // Actualizar el tiempo y el giro del personaje si no hay pausa.
+            if (!pausa) { reloj += dt;if (girar)anguloModelo += dt * glm::radians(14.0f); }
+            // Camara automatica con Bezier o camara manual con teclado.
+            glm::vec3 frente;
+            if (autoCam) { cam = trayectoria(reloj / 18.0f);frente = glm::normalize(glm::vec3(0, 1.35f, 0) - cam); }
+            else {
+                if (glfwGetKey(w, GLFW_KEY_LEFT) == GLFW_PRESS)yaw -= 75 * dt;
+                if (glfwGetKey(w, GLFW_KEY_RIGHT) == GLFW_PRESS)yaw += 75 * dt;
+                if (glfwGetKey(w, GLFW_KEY_UP) == GLFW_PRESS)pitch += 75 * dt;
+                if (glfwGetKey(w, GLFW_KEY_DOWN) == GLFW_PRESS)pitch -= 75 * dt;
+                pitch = glm::clamp(pitch, -89.0f, 89.0f);
+                frente = glm::normalize(glm::vec3(cos(glm::radians(yaw)) * cos(glm::radians(pitch)), sin(glm::radians(pitch)), sin(glm::radians(yaw)) * cos(glm::radians(pitch))));
+                glm::vec3 der = glm::normalize(glm::cross(frente, glm::vec3(0, 1, 0)));
+                float paso = 2.5f * dt * (glfwGetKey(w, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ? 2.0f : 1.0f);
+                if (glfwGetKey(w, GLFW_KEY_W) == GLFW_PRESS)cam += frente * paso;
+                if (glfwGetKey(w, GLFW_KEY_S) == GLFW_PRESS)cam -= frente * paso;
+                if (glfwGetKey(w, GLFW_KEY_A) == GLFW_PRESS)cam -= der * paso;
+                if (glfwGetKey(w, GLFW_KEY_D) == GLFW_PRESS)cam += der * paso;
+                if (glfwGetKey(w, GLFW_KEY_Q) == GLFW_PRESS)cam.y -= paso;
+                if (glfwGetKey(w, GLFW_KEY_E) == GLFW_PRESS)cam.y += paso;
+                if (glfwGetKey(w, GLFW_KEY_R) == GLFW_PRESS) { cam = { 0,1.3f,4.8f };yaw = -90;pitch = -7; }
+            }
+            // Preparar la ventana, la perspectiva y la vista de la camara.
+            int ancho, alto;glfwGetFramebufferSize(w, &ancho, &alto);if (alto == 0)continue;
+            glViewport(0, 0, ancho, alto);glClearColor(0.025f, 0.045f, 0.11f, 1);glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            glm::mat4 proj = glm::perspective(glm::radians(55.0f), (float)ancho / alto, 0.05f, 100.0f);
+            glm::mat4 view = glm::lookAt(cam, cam + frente, glm::vec3(0, 1, 0));
+            // Matriz del modelo: rotacion del personaje y ajuste de escala.
+            glm::mat4 giro = glm::rotate(glm::mat4(1), anguloModelo, glm::vec3(0, 1, 0));
+            glm::mat4 modelo = giro * normalizar;
+            // Posicion de la luz: fija o en movimiento segun la tecla F.
+            glm::vec3 luz = luzMovil ? glm::vec3(3 * cos(reloj * 0.6f), 3.4f, 3 * sin(reloj * 0.6f)) : glm::vec3(2, 3, 3);
+            // Dibujar cada parte del modelo con su material y textura.
+            shaderModelo.usar();shaderModelo.setMat4("model", modelo);shaderModelo.setMat4("view", view);shaderModelo.setMat4("projection", proj);
+            shaderModelo.setVec3("lightPos", luz);shaderModelo.setVec3("viewPos", cam);shaderModelo.setVec3("lightColor", glm::vec3(1.0f, 0.94f, 0.86f));
+            shaderModelo.setBool("usarPhong", phong);
+            shaderModelo.setInt("tex", 0);
+            glActiveTexture(GL_TEXTURE0);glBindVertexArray(vao);
+            for (const Parte& parte : e.partes) {
+                GLuint t = blanco;glm::vec4 color(1);
+                if (parte.material >= 0 && parte.material < (int)gltf.materials.size()) {
+                    const auto& mat = gltf.materials[parte.material];
+                    const auto& pbr = mat.pbrMetallicRoughness;
+                    if (pbr.baseColorFactor.size() == 4)color = glm::vec4((float)pbr.baseColorFactor[0], (float)pbr.baseColorFactor[1], (float)pbr.baseColorFactor[2], (float)pbr.baseColorFactor[3]);
+                    int texID = pbr.baseColorTexture.index;
+                    // Algunos GLB antiguos utilizan KHR_materials_pbrSpecularGlossiness.
+                    auto ext = mat.extensions.find("KHR_materials_pbrSpecularGlossiness");
+                    if (ext != mat.extensions.end() && ext->second.IsObject()) {
+                        const auto& ex = ext->second;
+                        if (ex.Has("diffuseFactor") && ex.Get("diffuseFactor").IsArray()) {
+                            const auto& arr = ex.Get("diffuseFactor").Get<tinygltf::Value::Array>();
+                            if (arr.size() == 4)
+                                for (int k = 0; k < 4; ++k) color[k] = (float)arr[k].GetNumberAsDouble();
+                        }
+                        if (ex.Has("diffuseTexture") && ex.Get("diffuseTexture").IsObject()) {
+                            const auto& dt = ex.Get("diffuseTexture");
+                            if (dt.Has("index") && dt.Get("index").IsInt()) texID = dt.Get("index").Get<int>();
+                        }
+                    }
+                    if (texID >= 0 && texID < (int)gltf.textures.size()) {
+                        int imagenID = gltf.textures[texID].source;
+                        if (imagenID >= 0 && imagenID < (int)imagenes.size() && imagenes[imagenID])t = imagenes[imagenID];
+                    }
+                    // Mantener ambas caras visibles; el programa no activa culling.
+                    (void)mat.doubleSided;
+                }
+                shaderModelo.setVec4("baseColor", color);
+                glBindTexture(GL_TEXTURE_2D, t);
+                glDrawElements(GL_TRIANGLES, (GLsizei)parte.cantidad, GL_UNSIGNED_INT, (void*)(uintptr_t)(parte.inicio * sizeof(unsigned int)));
+            }
+            glBindVertexArray(0);
+            // Mostrar la curva en color cian cuando se active la tecla B.
+            if (mostrarCurva) {
+                shaderCurva.usar();shaderCurva.setMat4("view", view);shaderCurva.setMat4("projection", proj);
+                shaderCurva.setVec3("color", glm::vec3(0.12f, 0.86f, 1.0f));
+                glBindVertexArray(lineVAO);glLineWidth(2.0f);glDrawArrays(GL_LINE_STRIP, 0, (GLsizei)curva.size());glBindVertexArray(0);
+            }
+            glfwSwapBuffers(w);
+        }
+        // Liberar los recursos de OpenGL antes de cerrar la ventana.
+        for (GLuint t : imagenes)if (t)glDeleteTextures(1, &t);
+        glDeleteTextures(1, &blanco);glDeleteBuffers(1, &lineVBO);glDeleteVertexArrays(1, &lineVAO);
+        glDeleteBuffers(1, &ebo);glDeleteBuffers(1, &vbo);glDeleteVertexArrays(1, &vao);
+    } // Destructores de Shader: glDeleteProgram con contexto vigente.
+    glfwDestroyWindow(w);glfwTerminate();return 0;
 }
