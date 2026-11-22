@@ -1,0 +1,25 @@
+
+# Archivos temporales de Visual Studio
+.vs/
+x64/
+Debug/
+Release/
+**/Debug/
+**/Release/
+
+# Archivos específicos del usuario
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+
+# Archivos compilados
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.tlog
+*.lastbuildstate
+
+# Archivos descargados accidentalmente de una página web
+/Tutorial/stb_image.h/
