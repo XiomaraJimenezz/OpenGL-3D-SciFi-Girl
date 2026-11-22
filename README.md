@@ -1,20 +1,34 @@
-
 # SciFi Girl | Exhibición 3D Interactiva
 
-Proyecto desarrollado en **C++ y OpenGL 3.3** que permite visualizar e interactuar con un personaje tridimensional mediante diferentes opciones de cámara, iluminación y movimiento.
+**Estudiante:** Nicoll Xiomara Jimenez Reyes 
+**Código estudiantil:** 6014411  
+**Universidad:** Universidad Militar Nueva Granada- Campus  
+**Programa:** Ingeniería en Multimedia  
+**Asignatura:** Computación Gráfica  
+**Proyecto:** Visualización y animación de un modelo 3D con OpenGL  
+**Año:** 2026
 
-La aplicación carga un modelo en formato GLB y lo representa en una escena 3D, utilizando shaders, texturas y transformaciones geométricas. Además, incorpora una cámara automática que recorre una trayectoria construida con curvas de Bézier.
+---
+
+## Descripción del proyecto
+
+Este proyecto consiste en la visualización de un personaje tridimensional llamado **SciFi Girl**, desarrollado en C++ mediante OpenGL 3.3.
+
+Su propósito es aplicar conceptos de gráficos por computadora, como la carga de modelos 3D, las transformaciones geométricas, la iluminación, el manejo de cámaras y las trayectorias mediante curvas de Bézier.
+
+La aplicación permite interactuar con el personaje dentro de una escena tridimensional, utilizando diferentes opciones de cámara, iluminación y movimiento.
 
 ## 1. Características del proyecto
 
 - Visualización de un personaje 3D con sus materiales y texturas.
-- Iluminación Phong para mejorar la apariencia del modelo.
+- Iluminación Blinn-Phong para mejorar la apariencia del modelo.
 - Rotación automática del personaje.
 - Cámara manual controlada mediante el teclado.
 - Cámara automática con trayectoria de Bézier.
 - Luz móvil que cambia de posición alrededor de la escena.
 - Visualización de la trayectoria de la cámara.
 - Opciones para pausar y activar o desactivar diferentes efectos.
+- Implementación de una clase `Shader` para administrar los programas gráficos.
 
 ## 2. Herramientas y tecnologías
 
@@ -27,57 +41,69 @@ La aplicación carga un modelo en formato GLB y lo representa en una escena 3D, 
 | GLM | Operaciones matemáticas y transformaciones 3D. |
 | TinyGLTF | Lectura del modelo en formato GLB. |
 | stb_image | Procesamiento de imágenes y texturas. |
+| GLSL | Programación de los shaders utilizados en la escena. |
 | Visual Studio | Entorno de desarrollo y compilación. |
 
 ## 3. Arquitectura y funcionamiento del programa
 
-El proyecto se desarrolla principalmente en `Main.cpp`, donde se encuentran las funciones necesarias para cargar el modelo, configurar OpenGL y controlar la escena.
+El proyecto utiliza una arquitectura modular sencilla, donde `Main.cpp` coordina la carga del modelo, la configuración de OpenGL, las cámaras, las animaciones, la iluminación y el renderizado.
 
-El funcionamiento general se organiza de la siguiente manera:
+Además, se implementó una clase `Shader`, separada en los archivos `Shader.h` y `Shader.cpp`, para administrar los programas de shaders utilizados por OpenGL.
 
-```text
-                INICIO DEL PROGRAMA
-                        |
-                        v
-              Carga del modelo GLB
-                        |
-                        v
-          Lectura de vértices y materiales
-                        |
-                        v
-          Construcción de la escena 3D
-                        |
-                        v
-            Inicialización de OpenGL
-                        |
-                        v
-           Configuración de los shaders
-                        |
-                        v
-         Preparación de buffers y texturas
-                        |
-                        v
-                BUCLE PRINCIPAL
-                        |
-          +-------------+-------------+
-          |             |             |
-          v             v             v
-       Teclado        Cámara      Iluminación
-          |             |             |
-          +-------------+-------------+
-                        |
-                        v
-               Renderizado 3D
-                        |
-                        v
-             Actualización de ventana
+Esta organización permite distribuir las responsabilidades del código y facilita su comprensión y mantenimiento.
+
+### 3.1. Diagrama de arquitectura
+
+```mermaid
+flowchart TD
+    A["Main.cpp - Programa principal"]
+    B["Carga del modelo GLB - TinyGLTF"]
+    C["Procesamiento de geometría y materiales"]
+    D["Inicialización gráfica - GLFW y GLAD"]
+    E["Buffers VAO, VBO y EBO"]
+    F["Clase Shader - Shader.h y Shader.cpp"]
+    G["Shaders GLSL"]
+    H["Bucle principal"]
+    I["Controles del teclado"]
+    J["Cámara y trayectoria Bézier - GLM"]
+    K["Iluminación Blinn-Phong"]
+    L["Renderizado de la escena"]
+    M["Liberación de recursos"]
+
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+    E --> F
+    F --> G
+    G --> H
+    H --> I
+    H --> J
+    H --> K
+    I --> J
+    J --> L
+    K --> L
+    G --> L
+    L --> H
+    H --> M
 ```
 
-Esta organización permite separar las tareas de preparación de datos, configuración gráfica e interacción durante la ejecución.
+### 3.2. Flujo de ejecución
 
-### 3.1. Lectura y construcción del modelo
+El funcionamiento general del programa se desarrolla mediante las siguientes etapas:
 
-El archivo principal que utiliza la aplicación es:
+1. **Carga del modelo:** se lee el archivo GLB y se extraen sus vértices, índices, normales, materiales y texturas.
+2. **Construcción de la escena:** se organizan las mallas y se calculan las transformaciones necesarias.
+3. **Inicialización gráfica:** se crea la ventana y se configuran GLFW, GLAD y OpenGL.
+4. **Configuración de shaders:** se preparan los programas utilizados para representar el modelo y la trayectoria.
+5. **Preparación de buffers:** se transfieren los datos geométricos a la GPU mediante VAO, VBO y EBO.
+6. **Actualización:** se procesan las entradas del teclado y se calculan los movimientos del personaje, la cámara y la luz.
+7. **Renderizado:** se dibuja el modelo utilizando sus materiales, texturas e iluminación.
+8. **Finalización:** se liberan los recursos gráficos y se cierra la aplicación.
+
+### 3.3. Lectura y construcción del modelo
+
+El archivo principal utilizado por la aplicación es:
 
 `models/scifi_girl_v.01.glb`
 
@@ -102,18 +128,15 @@ Entre las funciones principales se encuentran:
 
 El programa también calcula normales cuando una malla no las proporciona, lo que permite realizar los cálculos de iluminación.
 
-### 3.2. Preparación de la geometría
+### 3.4. Preparación de la geometría
 
 Una vez obtenidos los datos del modelo, se transfieren a la GPU mediante los siguientes elementos:
 
-**VAO (Vertex Array Object):**
-Almacena la configuración de los atributos de los vértices.
+**VAO (Vertex Array Object):** almacena la configuración de los atributos de los vértices.
 
-**VBO (Vertex Buffer Object):**
-Guarda la información de los vértices, como sus posiciones, normales y coordenadas de textura.
+**VBO (Vertex Buffer Object):** guarda la información de los vértices, como sus posiciones, normales y coordenadas de textura.
 
-**EBO (Element Buffer Object):**
-Contiene los índices utilizados para formar los triángulos.
+**EBO (Element Buffer Object):** contiene los índices utilizados para formar los triángulos.
 
 El dibujo de las diferentes partes del personaje se realiza mediante:
 
@@ -121,7 +144,7 @@ El dibujo de las diferentes partes del personaje se realiza mediante:
 
 Esto permite representar las mallas del personaje utilizando los materiales correspondientes.
 
-### 3.3. Shaders y renderizado
+### 3.5. Shaders y renderizado
 
 El proyecto utiliza shaders escritos en GLSL para procesar la geometría y calcular el color de los fragmentos.
 
@@ -148,7 +171,7 @@ Calcula el color visible de cada fragmento, combinando:
 
 También se utilizan shaders adicionales para dibujar la trayectoria de la cámara.
 
-### 3.4. Iluminación Phong
+### 3.6. Iluminación Blinn-Phong
 
 La escena incorpora iluminación con componentes ambientales, difusas y especulares.
 
@@ -156,13 +179,13 @@ La escena incorpora iluminación con componentes ambientales, difusas y especula
 - **Difusa:** depende de la orientación de la superficie respecto a la luz.
 - **Especular:** produce reflejos que ayudan a destacar la forma del modelo.
 
-El cálculo se realiza dentro del Fragment Shader.
+El cálculo se realiza dentro del Fragment Shader, utilizando un vector intermedio entre la dirección de la luz y la dirección de observación para calcular la componente especular.
 
 La aplicación permite activar o desactivar esta iluminación para comparar la apariencia del personaje.
 
 También se implementa una luz móvil cuya posición cambia con el tiempo mediante funciones trigonométricas.
 
-### 3.5. Cámara y trayectoria de Bézier
+### 3.7. Cámara y trayectoria de Bézier
 
 El proyecto cuenta con dos formas de controlar la cámara.
 
@@ -189,7 +212,7 @@ Las funciones utilizadas son:
 
 La cámara se desplaza por esta trayectoria mientras mantiene su orientación hacia el personaje.
 
-### 3.6. Interacción y actualización de la escena
+### 3.8. Interacción y actualización de la escena
 
 El programa utiliza un bucle principal que permanece activo mientras la ventana esté abierta.
 
@@ -206,91 +229,28 @@ Durante cada iteración se realizan las siguientes operaciones:
 
 La función `teclaNueva()` permite detectar pulsaciones individuales para cambiar los modos sin repetir continuamente la acción mientras una tecla permanece presionada.
 
-## 4. Controles de la aplicación
+## 4. Implementación de la clase Shader
 
-| Tecla | Acción |
-|---|---|
-| `1` | Activar cámara manual. |
-| `2` | Activar cámara automática con Bézier. |
-| `3` | Activar o desactivar el giro del personaje. |
-| `L` | Activar o desactivar iluminación Phong. |
-| `F` | Activar o desactivar el movimiento de la luz. |
-| `B` | Mostrar u ocultar la trayectoria de la cámara. |
-| `Espacio` | Pausar o reanudar la animación. |
-| `W / A / S / D` | Desplazar la cámara manualmente. |
-| `Q / E` | Bajar o subir la cámara. |
-| `Flechas` | Cambiar la dirección de observación. |
-| `Shift izquierdo` | Aumentar la velocidad de desplazamiento. |
-| `R` | Restablecer la cámara manual. |
-| `Esc` | Cerrar la aplicación. |
+Para mejorar la organización del proyecto, se implementó una clase `Shader` que permite administrar los programas de shaders utilizados en OpenGL.
 
-## 5. Organización de los archivos
+Anteriormente, la compilación y el enlazado de los shaders se realizaban directamente en `Main.cpp`. Con esta modificación, estas tareas se separaron del código principal, facilitando su comprensión, mantenimiento y reutilización.
 
-```text
-OpenGL-3D-SciFi-Girl/
-|
-|-- Libraries/
-|   |-- include/
-|   |   |-- GLFW/
-|   |   |-- glad/
-|   |   |-- glm/
-|   |   |-- tinygltf/
-|   |-- lib/
-|       |-- glfw3.lib
-|
-|-- models/
-|   |-- scifi_girl_v.01.glb
-|   |-- Duck.glb
-|
-|-- Main.cpp
-|-- glad.c
-|-- stb_image.h
-|
-|-- textura1.jpg
-|-- textura2.jpg
-|-- textura3.jpg
-|
-|-- Tutorial.slnx
-|-- Tutorial.vcxproj
-|-- Tutorial.vcxproj.filters
-|-- .gitignore
-```
+### 4.1. Organización de los archivos
 
-El archivo `Main.cpp` contiene la implementación principal. La carpeta `Libraries` incluye las dependencias necesarias y `models` almacena los modelos tridimensionales.
+- **Shader.h:** contiene la declaración de la clase `Shader` y sus métodos.
+- **Shader.cpp:** implementa las funciones necesarias para compilar, enlazar y utilizar los programas de shaders.
+- **Main.cpp:** coordina la carga del modelo, las transformaciones, la cámara, la iluminación y el renderizado.
 
-El modelo utilizado por defecto es `scifi_girl_v.01.glb`. El repositorio también contiene otros recursos que no forman parte de la escena principal.
+### 4.2. Funcionamiento de la clase
 
-## 6. Cómo ejecutar el proyecto
+La clase `Shader` administra los programas utilizados por la GPU para procesar los vértices y determinar la apariencia de los fragmentos.
 
-1. Descargar o clonar el repositorio.
-2. Abrir `Tutorial.slnx` en Visual Studio.
-3. Comprobar que las rutas de las bibliotecas y del enlazador estén configuradas correctamente.
-4. Seleccionar la configuración de compilación correspondiente.
-5. Verificar que el directorio de trabajo permita encontrar la carpeta `models`.
-6. Compilar y ejecutar el proyecto.
+Sus responsabilidades principales son:
 
-El programa requiere un entorno compatible con OpenGL 3.3.
+1. Compilar el Vertex Shader y el Fragment Shader.
+2. Enlazar ambos shaders en un programa de OpenGL.
+3. Comprobar posibles errores de compilación o enlazado.
+4. Activar el programa correspondiente durante el renderizado.
+5. Configurar variables `uniform`, como matrices de transformación, colores y parámetros de iluminación.
 
-La ruta del modelo está definida en `Main.cpp`:
-
-```cpp
-const std::string RUTA_MODELO = "models/scifi_girl_v.01.glb";
-```
-
-Por esta razón, el directorio de trabajo debe contener la carpeta `models` con el archivo correspondiente.
-
-## 7. Alcance del proyecto
-
-SciFi Girl permite explorar conceptos de gráficos por computadora mediante la visualización de modelos tridimensionales, la aplicación de materiales, la iluminación y el movimiento de cámaras.
-
-Aunque el programa permite rotar el personaje completo, no implementa animación esquelética ni deformaciones individuales de sus partes.
-
-La iluminación Phong es una implementación propia en GLSL y no reproduce completamente el sistema PBR de los materiales glTF.
-
-## 8. Conclusión
-
-El proyecto reúne diferentes herramientas y conceptos de programación gráfica para desarrollar una escena tridimensional interactiva.
-
-Su implementación permite comprender cómo se procesan los datos de un modelo 3D, cómo se utilizan los shaders para representar superficies y cómo las transformaciones matemáticas permiten controlar el movimiento de objetos y cámaras.
-
-La combinación de iluminación, texturas y trayectorias de Bézier ofrece una forma práctica de estudiar el funcionamiento de OpenGL y la construcción de aplicaciones gráficas en tiempo real.
+### 4.3. Aplicación en SciFi Girl
